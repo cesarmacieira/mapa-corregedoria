@@ -4,6 +4,8 @@ import openpyxl
 import streamlit as st
 from io import BytesIO
 from datetime import datetime
+import plotly.express as px
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="JFCE",
                    page_icon="chart",
@@ -215,21 +217,14 @@ elif painel == "Dados":
             file_name=nome_arquivo, mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 elif painel == "Análises":
     st.title("Análises")
-
-    import plotly.express as px
-    import matplotlib.pyplot as plt
-
     subsecoes = dados['LOTACAO_PAI'].value_counts().sort_values(ascending=False)
     cargos = dados['CARGO'].value_counts().sort_values(ascending=False)
-
-    # Preparar DataFrames para os gráficos
     subsecoes_df = subsecoes.reset_index()
     subsecoes_df.columns = ['Subseção', 'Quantidade de Servidores']
     cargos_df = cargos.reset_index()
     cargos_df.columns = ['Cargo', 'Quantidade de Servidores']
 
     col1, col2 = st.columns([2,1])
-
     with col1:
         fig1 = px.bar(subsecoes_df, y='Subseção', x='Quantidade de Servidores', orientation='h',
             labels={'Subseção': 'Subseção', 'Quantidade de Servidores': 'Quantidade de Servidores'},
