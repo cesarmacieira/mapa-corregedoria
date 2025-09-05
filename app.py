@@ -195,9 +195,8 @@ if painel == "Mapa da Corregedoria":
     tabela_lotacoes = dados[dados['LOTACAO_PAI'] == selecao_lotacoes]
     tabela_lotacoes = (tabela_lotacoes.groupby("CARGO").size().reset_index(name='Quantidade de servidores')
         .sort_values(by='Quantidade de servidores', ascending=False))
-    tabela_html = tabela_lotacoes.to_html(index=False, classes='tabela-lotacoes', border=0)
-    st.markdown(tabela_html, unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.dataframe(tabela_lotacoes.reset_index(drop=True), use_container_width=False)
+    
     hoje = datetime.today().strftime('%d-%m-%Y')
     nome_arquivo = f"Lotação - {selecao_lotacoes} - {hoje}.xlsx"
     tabela_lotacoes.to_excel(nome_arquivo, index=False, engine='openpyxl')
@@ -205,9 +204,12 @@ if painel == "Mapa da Corregedoria":
     # Cria botão de download
     with open(nome_arquivo, "rb") as file:
         st.download_button(
-            label=f"📥 Baixar dados da {selecao_lotacoes}", data=file,
+            label=f"📥 Baixar dados da {selecao_lotacoes}",
+            data=file,
             file_name=nome_arquivo,
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            key="download_lotacoes"
+        )
         
     st.title("Provimento")
     selecao_provimento = st.selectbox("Selecione a lotação para ver a quantidade de servidores:", 
@@ -216,9 +218,7 @@ if painel == "Mapa da Corregedoria":
     tabela_provimento = dados[dados['LOTACAO_PAI'] == selecao_provimento]
     tabela_provimento = (tabela_provimento.groupby("STATUS_PROVIMENTO").size().reset_index(name='Quantidade de servidores')
         .sort_values(by='Quantidade de servidores', ascending=False))
-    tabela_html = tabela_provimento.to_html(index=False, classes='tabela-provimento', border=0)
-    st.markdown(tabela_html, unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.dataframe(tabela_provimento.reset_index(drop=True), use_container_width=False)
     hoje = datetime.today().strftime('%d-%m-%Y')
     nome_arquivo = f"Lotação - {selecao_provimento} - {hoje}.xlsx"
     tabela_provimento.to_excel(nome_arquivo, index=False, engine='openpyxl')
@@ -226,9 +226,12 @@ if painel == "Mapa da Corregedoria":
     # Cria botão de download
     with open(nome_arquivo, "rb") as file:
         st.download_button(
-            label=f"📥 Baixar dados da {selecao_provimento}", data=file,
+            label=f"📥 Baixar dados da {selecao_provimento}",
+            data=file,
             file_name=nome_arquivo,
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            key="download_provimento"
+        )
 
 elif painel == "Dados Brutos":
     st.title("Dados primários")
