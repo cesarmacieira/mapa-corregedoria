@@ -41,7 +41,7 @@ def limpar_nome_aba(nome):
 dados = pd.concat([dados_adm, dados_jud], ignore_index=True)
 dados['STATUS_PROVIMENTO'] = dados['SITUACAO'].apply(classificar_vinculo)
 
-painel = st.sidebar.radio("Selecione o painel", ["Mapa da Corregedoria", "Dados", "Análises"])
+painel = st.sidebar.radio("Selecione o painel", ["Mapa da Corregedoria", "Dados Brutos", "Análises"])
 
 if painel == "Mapa da Corregedoria":
     st.title("Mapa da Corregedoria")
@@ -230,9 +230,7 @@ if painel == "Mapa da Corregedoria":
             file_name=nome_arquivo,
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-
-
-elif painel == "Dados":
+elif painel == "Dados Brutos":
     st.title("Dados primários")
     ordem_lotacoes = [
         'SECRETARIA ADMINISTRATIVA','DIRETORIA DO FORO',
