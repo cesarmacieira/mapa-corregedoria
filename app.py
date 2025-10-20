@@ -419,7 +419,7 @@ if painel == "Mapa da Corregedoria":
     
     hoje = datetime.today().strftime('%d-%m-%Y')
     nome_arquivo = f"Lotação - {selecao_lotacoes} - {hoje}.xlsx"
-    tabela_lotacoes.to_excel(nome_arquivo, index=False, engine='openpyxl')
+    #tabela_lotacoes.to_excel(nome_arquivo, index=False, engine='openpyxl')
 
     # Cria botão de download
     # with open(nome_arquivo, "rb") as file:
@@ -439,7 +439,7 @@ if painel == "Mapa da Corregedoria":
 
     hoje = datetime.today().strftime('%d-%m-%Y')
     nome_arquivo = f"Lotação - {selecao_provimento} - {hoje}.xlsx"
-    tabela_provimento.to_excel(nome_arquivo, index=False, engine='openpyxl')
+    #tabela_provimento.to_excel(nome_arquivo, index=False, engine='openpyxl')
 
     # Cria botão de download
     # with open(nome_arquivo, "rb") as file:
@@ -530,9 +530,22 @@ elif painel == "Dados Brutos":
     st.data_editor(tabela_formatada, use_container_width=True, hide_index=True, disabled=True)
     hoje = datetime.today().strftime('%d-%m-%Y')
     nome_arquivo = f'Dados da lotação - {selecao_lotacoes} {hoje}.xlsx'
-    if st.button(f"📥 Gerar arquivo da {selecao_lotacoes}"):
-        tabela.to_excel(nome_arquivo, index=False, engine='openpyxl')
-        with open(nome_arquivo, "rb") as file:
-            st.download_button(label=f"⬇️ Baixar dados da {selecao_lotacoes}", data=file,
-                file_name=nome_arquivo, mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    # if st.button(f"📥 Gerar arquivo da {selecao_lotacoes}"):
+    #     tabela.to_excel(nome_arquivo, index=False, engine='openpyxl')
+    #     with open(nome_arquivo, "rb") as file:
+    #         st.download_button(label=f"⬇️ Baixar dados da {selecao_lotacoes}", data=file,
+    #             file_name=nome_arquivo, mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            
+    # Geração do arquivo em memória
+    output = BytesIO()
+    tabela.to_excel(output, index=False, engine='openpyxl')
+    output.seek(0)
+
+    # Botão único para gerar e baixar
+    st.download_button(
+        label=f"📥 Download dos dados da {selecao_lotacoes}",
+        data=output,
+        file_name=f"Dados da lotação - {selecao_lotacoes} {hoje}.xlsx",
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+)
 
