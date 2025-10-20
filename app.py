@@ -1,11 +1,15 @@
+import io
 import pandas as pd
 import re
 import openpyxl
+from openpyxl import load_workbook
+from openpyxl.styles import Border, Side
 import streamlit as st
 from io import BytesIO
 from datetime import datetime
 import plotly.express as px
 import matplotlib.pyplot as plt
+import requests
 
 st.set_page_config(page_title="JFCE",
                    page_icon="chart",
@@ -13,321 +17,475 @@ st.set_page_config(page_title="JFCE",
                    initial_sidebar_state="auto",
                    menu_items=None)
 
-dados_adm = pd.read_csv('SERVIDORES_ADM_15_07_2025.csv')
-dados_jud = pd.read_csv('SERVIDORES_JUD_15_07_2025.csv')
-dados_adm = dados_adm.drop(columns=['LOTA_COD_LOTACAO'])
+# Extração dos dados
+url = "https://webservice-d.jfce.jus.br/sarh_new/json/buscarMapaCorregedoria"
+try:
+    resposta = requests.get(url, timeout=20)
+    resposta.raise_for_status()
+    dados_json = resposta.json()
+    # Acessa a lista de funcionários dentro do dicionário
+    funcionarios = dados_json["mapaCorregedoria"]["funcionarios"]
+    # Converte para DataFrame
+    dados = pd.DataFrame(funcionarios)
 
-def classificar_vinculo(situacao):
-    if pd.isna(situacao):
-        return 'SEM VÍNCULO'
-    elif situacao in ['ATIVO']:
-        return 'EFETIVO'
-    elif situacao in ['ATIVO - EX. PROVISÓRIO']:
-        return 'EXERCÍCIO PROVISÓRIO'
-    elif situacao in ['REQUISITADO DE MUNICIPIOS - ESTATUTARIO', 'REQUISITADO DA UNIAO - CLT',
-       'REQUISITADO DE MUNICIPIOS - CLT', 'REQUISITADO DE ESTADOS - ESTATUTARIO',
-       'REQUISITADO DO JUDICIARIO FEDERAL', 'REQUISITADO DA UNIAO - ESTATUTARIO','REQUISITADO DE ESTADOS - CLT']:
-        return 'REQUISITADO'
-    elif situacao in ['ATIVO REMOVIDO (ACOMPANHAMENTO DE CONJUGE)', 'ATIVO REMOVIDO (ART. 41 RES. CJF Nº 03/2008)',
-       'ATIVO REMOVIDO (MOTIVO DE SAUDE)', 'ATIVO REMOVIDO (SINAR)', 'ATIVO REMOVIDO (A PEDIDO, CRITERIO DA ADMINISTRACAO)',
-       'DO JUDICIARIO FEDERAL - ATIVO REMOVIDO SINAR', 'ATIVO REMOVIDO (POR PERMUTA - RES. TRF5 Nº 07/2015)']:
-        return 'REMOVIDO'
+
+except requests.exceptions.RequestException as e:
+    st.write(f"Erro ao acessar o webservice: {e}. Comunique a equipe responsável.")
+    
+
+# Transformação dos dados
+## Definição do vínculo
+def definir_vinculo(row):
+    if row["divisao"] == "SERVIDOR DO QUADRO":
+        return "EFETIVO"
+    elif row["divisao"] == "SEM VINCULO":
+        return "SEM VÍNCULO"
+    elif row["divisao"] == "SERVIDOR DE OUTROS ORGAOS":
+        if row["provimento"] == "AUTORIZACAO PARA EXERCICIO PROVISORIO":
+            return "EXERCÍCIO PROVISÓRIO"
+        elif "REMOV" in row["situacao"]:
+            return "REMOVIDO"
+        else:
+            return "REQUISITADO"
     else:
-        return 'OUTRO'
+        return "OUTRO"
+dados["vinculo"] = dados.apply(definir_vinculo, axis=1)
 
+## Ordenação dos cargos e tratamento de valores ausentes
+cargo_order = [
+    "ANALISTA JUDICIÁRIO/ ADMINISTRATIVA",
+    "ANALISTA JUDICIÁRIO/ APOIO ESPECIALIZADO (ANÁLISE DE SISTEMAS DE INFORMAÇÃO)",
+    "ANALISTA JUDICIÁRIO/ APOIO ESPECIALIZADO (BIBLIOTECONOMIA)",
+    "ANALISTA JUDICIÁRIO/ APOIO ESPECIALIZADO (CONTABILIDADE)",
+    "ANALISTA JUDICIÁRIO/ APOIO ESPECIALIZADO (ENGENHARIA (CIVIL))",
+    "ANALISTA JUDICIÁRIO/ APOIO ESPECIALIZADO (INFORMÁTICA (INFRAESTRUTURA))",
+    "ANALISTA JUDICIÁRIO/ APOIO ESPECIALIZADO (MEDICINA (CLÍNICA GERAL))",
+    "ANALISTA JUDICIÁRIO/ APOIO ESPECIALIZADO (PSICOLOGIA)",
+    "ANALISTA JUDICIÁRIO/ APOIO ESPECIALIZADO (TECNOLOGIA DA INFORMAÇÃO)",
+    "ANALISTA JUDICIÁRIO/ JUDICIÁRIA",
+    "ANALISTA JUDICIÁRIO/ JUDICIÁRIA (OFICIAL DE JUSTIÇA AVALIADOR FEDERAL)",
+    "TÉCNICO JUDICIÁRIO/ ADMINISTRATIVA",
+    "TÉCNICO JUDICIÁRIO/ ADMINISTRATIVA (AGENTE DE POLÍCIA JUDICIAL)",
+    "TÉCNICO JUDICIÁRIO/ APOIO ESPECIALIZADO (CONTABILIDADE)",
+    "TÉCNICO JUDICIÁRIO/ APOIO ESPECIALIZADO (TECNOLOGIA DA INFORMAÇÃO)",
+    "SEM DESCRIÇÃO DE CARGO"]
+dados['descricaoCargo'] = dados['descricaoCargo'].apply(lambda x: "SEM DESCRIÇÃO DE CARGO" if pd.isna(x) or x == "" else x)
+dados['descricaoCargo'] = pd.Categorical(dados['descricaoCargo'], categories=cargo_order, ordered=True)
+
+## Substituição de nomes de lotações (gabinetes por diretoria/subdiretorias)
+def substituir_gabinete(lotacao):
+    if lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DO FORO":
+        return "DIRETORIA DO FORO"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE LIMOEIRO DO NORTE":
+        return "SUBDIRETORIA DO FORO - LIMOEIRO DO NORTE"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE JUAZEIRO DO NORTE":
+        return "SUBDIRETORIA DO FORO - JUAZEIRO DO NORTE"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE SOBRAL":
+        return "SUBDIRETORIA DO FORO - SOBRAL"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE CRATEUS":
+        return "SUBDIRETORIA DO FORO - CRATEÚS"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE QUIXADA":
+        return "SUBDIRETORIA DO FORO - QUIXADÁ"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE TAUA":
+        return "SUBDIRETORIA DO FORO - TAUÁ"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE IGUATU":
+        return "SUBDIRETORIA DO FORO - IGUATU"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE ITAPIPOCA":
+        return "SUBDIRETORIA DO FORO - ITAPIPOCA"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO-MARACANAU-CE":
+        return "SUBDIRETORIA DO FORO - MARACANAÚ"
+    else:
+        return lotacao
+dados['descricaoLotacaoPai_subdiretoria'] = dados['descricaoLotacaoPai'].apply(substituir_gabinete)
+
+## Simplificação das lotações para agrupamento (diretoria, subdiretorias, turmas recursais, núcleos)
+def simplificar_lotacao(lotacao):
+    if lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DO FORO":
+        return "DIRETORIA DO FORO"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE LIMOEIRO DO NORTE":
+        return "SUBDIRETORIA DO FORO - LIMOEIRO DO NORTE"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE JUAZEIRO DO NORTE":
+        return "SUBDIRETORIA DO FORO - JUAZEIRO DO NORTE"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE SOBRAL":
+        return "SUBDIRETORIA DO FORO - SOBRAL"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE CRATEUS":
+        return "SUBDIRETORIA DO FORO - CRATEUS"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE QUIXADA":
+        return "SUBDIRETORIA DO FORO - QUIXADÁ"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE TAUA":
+        return "SUBDIRETORIA DO FORO - TAUÁ"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE IGUATU":
+        return "SUBDIRETORIA DO FORO - IGUATU"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO DE ITAPIPOCA":
+        return "SUBDIRETORIA DO FORO - ITAPIPOCA"
+    elif lotacao == "GABINETE DO JUIZ FEDERAL DIRETOR DA SUBSEÇAO-MARACANAU-CE":
+        return "SUBDIRETORIA DO FORO - MARACANAÚ"
+    elif lotacao in ["1ª TURMA RECURSAL", "2ª TURMA RECURSAL", "3ª TURMA RECURSAL"]:
+        return "TURMAS RECURSAIS"
+    elif lotacao in [
+        "NUCLEO DE AUDITORIA INTERNA", "NUCLEO DE ESTRATEGIA, GOVERNANÇA E INTEGRIDADE",
+        "NUCLEO DE GESTAO DE PESSOAS", "NUCLEO DE GESTAO ORCAMENTARIA FINANCEIRA CONTABIL E PATRIMONIAL",
+        "NUCLEO DE INFRAESTRUTURA E ADMINISTRAÇAO PREDIAL", "NUCLEO DE INTELIGENCIA, SEGURANÇA E TRANSPORTE",
+        "NUCLEO DE TECNOLOGIA DA INFORMAÇAO E COMUNICAÇAO", "NUCLEO JUDICIARIO"]:
+        return "NUCLEO"
+    else:
+        return lotacao
+dados['lotacaoSimplificada'] = dados['descricaoLotacaoPai'].apply(simplificar_lotacao)
+
+## Definição dos grupos de subsecao para somatórios (totalizadores)
+grupos_subsecao = {
+    'TOTAL FORTALEZA': [
+        "1ª VARA - FORTALEZA-CE","2ª VARA - FORTALEZA-CE","3ª VARA - FORTALEZA-CE","4ª VARA - FORTALEZA-CE",
+        "5ª VARA - FORTALEZA-CE","6ª VARA - FORTALEZA-CE","7ª VARA - FORTALEZA-CE","8ª VARA - FORTALEZA-CE",
+        "9ª VARA - FORTALEZA-CE","10ª VARA - FORTALEZA-CE","11ª VARA - FORTALEZA-CE","12ª VARA - FORTALEZA-CE",
+        "13ª VARA - JEF - FORTALEZA-CE","14ª VARA - JEF - FORTALEZA-CE","20ª VARA - FORTALEZA-CE",
+        "21ª VARA - JEF - FORTALEZA-CE","26ª VARA - JEF - FORTALEZA - CE","28ª VARA - JEF - FORTALEZA-CE",
+        "32ª VARA - FORTALEZA-CE","33ª VARA - FORTALEZA-CE",
+        "1ª TURMA RECURSAL","2ª TURMA RECURSAL","3ª TURMA RECURSAL",
+        "SECRETARIA ADMINISTRATIVA","DIRETORIA DO FORO"],
+    "TOTAL RECURSAIS": ["1ª TURMA RECURSAL","2ª TURMA RECURSAL","3ª TURMA RECURSAL"],
+    'TOTAL LIMOEIRO DO NORTE': ["15ª VARA - LIMOEIRO DO NORTE-CE","29ª VARA - JEF - LIMOEIRO DO NORTE - CE",
+                        "SUBDIRETORIA DO FORO - LIMOEIRO DO NORTE"],
+    'TOTAL JUAZEIRO DO NORTE': ["16ª VARA - JUAZEIRO DO NORTE-CE","17ª VARA - JEF - JUAZEIRO DO NORTE-CE",
+                        "30ª VARA - JEF - JUAZEIRO DO NORTE - CE",
+                        "SUBDIRETORIA DO FORO - JUAZEIRO DO NORTE"],
+    'TOTAL SOBRAL': ["18ª VARA - SOBRAL-CE","19ª VARA - JEF - SOBRAL-CE","31ª VARA - JEF - SOBRAL - CE",
+                    "SUBDIRETORIA DO FORO - SOBRAL"],
+    'TOTAL CRATEÚS': ["22ª VARA - CRATEÚS-CE","SUBDIRETORIA DO FORO - CRATEÚS"],
+    'TOTAL QUIXADÁ': ["23ª VARA - QUIXADÁ-CE","SUBDIRETORIA DO FORO - QUIXADÁ"],
+    'TOTAL TAUÁ': ["24ª VARA - TAUÁ-CE","SUBDIRETORIA DO FORO - TAUÁ"],
+    'TOTAL IGUATU': ["25ª VARA - IGUATU-CE","SUBDIRETORIA DO FORO - IGUATU"],
+    'TOTAL ITAPIPOCA': ["27ª VARA- ITAPIPOCA-CE","SUBDIRETORIA DO FORO - ITAPIPOCA"],
+    'TOTAL MARACANAÚ': ["34ª VARA - MARACANAÚ-CE","35ª VARA - JEF - MARACANAÚ-CE",
+                        "SUBDIRETORIA DO FORO - MARACANAÚ"],
+    'TOTAL SERVIDORES COM LOTAÇÃO': ['TOTAL FORTALEZA','TOTAL LIMOEIRO DO NORTE''TOTAL JUAZEIRO DO NORTE','TOTAL SOBRAL','TOTAL CRATEÚS',
+                        'TOTAL QUIXADÁ','TOTAL TAUÁ','TOTAL IGUATU','TOTAL ITAPIPOCA', 'TOTAL MARACANAÚ'],
+    'TOTAL SERVIDORES SEM LOTAÇÃO': ["SERVIDORA EM LICENÇA GESTANTE EXERC. FUNÇÃO",
+                    "SERVIDORES CEDIDOS/EXERCICIO PROVISÓRIO/REMOVIDO"],
+    'TOTAL SERVIDORES': ['TOTAL SERVIDORES COM LOTAÇÃO','TOTAL SERVIDORES SEM LOTAÇÃO'],
+    'TOTAL NÚCLEOS': ["NUCLEO DE AUDITORIA INTERNA","NUCLEO DE ESTRATEGIA, GOVERNANÇA E INTEGRIDADE",
+                    "NUCLEO DE GESTAO DE PESSOAS","NUCLEO DE GESTAO ORCAMENTARIA FINANCEIRA CONTABIL E PATRIMONIAL",
+                    "NUCLEO DE INFRAESTRUTURA E ADMINISTRAÇAO PREDIAL","NUCLEO DE INTELIGENCIA, SEGURANÇA E TRANSPORTE",
+                    "NUCLEO DE TECNOLOGIA DA INFORMAÇAO E COMUNICAÇAO","NUCLEO JUDICIARIO"],
+}
+
+## Definição da ordem das colunas e abas
+ordem_colunas_mapa  = [
+    "1ª VARA - FORTALEZA-CE","2ª VARA - FORTALEZA-CE","3ª VARA - FORTALEZA-CE","4ª VARA - FORTALEZA-CE",
+    "5ª VARA - FORTALEZA-CE","6ª VARA - FORTALEZA-CE","7ª VARA - FORTALEZA-CE","8ª VARA - FORTALEZA-CE",
+    "9ª VARA - FORTALEZA-CE","10ª VARA - FORTALEZA-CE","11ª VARA - FORTALEZA-CE","12ª VARA - FORTALEZA-CE",
+    "13ª VARA - JEF - FORTALEZA-CE","14ª VARA - JEF - FORTALEZA-CE","20ª VARA - FORTALEZA-CE",
+    "21ª VARA - JEF - FORTALEZA-CE","26ª VARA - JEF - FORTALEZA - CE","28ª VARA - JEF - FORTALEZA-CE",
+    "32ª VARA - FORTALEZA-CE","33ª VARA - FORTALEZA-CE",
+    "1ª TURMA RECURSAL","2ª TURMA RECURSAL","3ª TURMA RECURSAL","TOTAL RECURSAIS",
+    "SECRETARIA ADMINISTRATIVA","DIRETORIA DO FORO",
+    "TOTAL FORTALEZA",
+
+    "15ª VARA - LIMOEIRO DO NORTE-CE","29ª VARA - JEF - LIMOEIRO DO NORTE - CE",
+    "SUBDIRETORIA DO FORO - LIMOEIRO DO NORTE",'TOTAL LIMOEIRO DO NORTE',
+    
+    "16ª VARA - JUAZEIRO DO NORTE-CE","17ª VARA - JEF - JUAZEIRO DO NORTE-CE",
+    "30ª VARA - JEF - JUAZEIRO DO NORTE - CE",
+    "SUBDIRETORIA DO FORO - JUAZEIRO DO NORTE",'TOTAL JUAZEIRO DO NORTE',
+    
+    "18ª VARA - SOBRAL-CE","19ª VARA - JEF - SOBRAL-CE","31ª VARA - JEF - SOBRAL - CE",
+    "SUBDIRETORIA DO FORO - SOBRAL",'TOTAL SOBRAL',
+    
+    "22ª VARA - CRATEÚS-CE","SUBDIRETORIA DO FORO - CRATEÚS",'TOTAL CRATEÚS',
+
+    "23ª VARA - QUIXADÁ-CE","SUBDIRETORIA DO FORO - QUIXADÁ",'TOTAL QUIXADÁ',
+
+    "24ª VARA - TAUÁ-CE","SUBDIRETORIA DO FORO - TAUÁ",'TOTAL TAUÁ',
+
+    "25ª VARA - IGUATU-CE","SUBDIRETORIA DO FORO - IGUATU",'TOTAL IGUATU',
+
+    "27ª VARA- ITAPIPOCA-CE","SUBDIRETORIA DO FORO - ITAPIPOCA",'TOTAL ITAPIPOCA',
+
+    "34ª VARA - MARACANAÚ-CE","35ª VARA - JEF - MARACANAÚ-CE",
+    "SUBDIRETORIA DO FORO - MARACANAÚ",'TOTAL MARACANAÚ',
+    
+    'TOTAL SERVIDORES COM LOTAÇÃO',
+
+    "SERVIDORA EM LICENÇA GESTANTE EXERC. FUNÇÃO","SERVIDORES CEDIDOS/EXERCICIO PROVISÓRIO/REMOVIDO",
+    'TOTAL SERVIDORES SEM LOTAÇÃO',
+    'TOTAL SERVIDORES',
+    
+    "NUCLEO DE AUDITORIA INTERNA","NUCLEO DE ESTRATEGIA, GOVERNANÇA E INTEGRIDADE",
+    "NUCLEO DE GESTAO DE PESSOAS","NUCLEO DE GESTAO ORCAMENTARIA FINANCEIRA CONTABIL E PATRIMONIAL",
+    "NUCLEO DE INFRAESTRUTURA E ADMINISTRAÇAO PREDIAL","NUCLEO DE INTELIGENCIA, SEGURANÇA E TRANSPORTE",
+    "NUCLEO DE TECNOLOGIA DA INFORMAÇAO E COMUNICAÇAO","NUCLEO JUDICIARIO","TOTAL NÚCLEOS"]
+
+ordem_abas_arquivo = [
+    "SECRETARIA ADMINISTRATIVA","DIRETORIA DO FORO",
+    "1ª TURMA RECURSAL","2ª TURMA RECURSAL","3ª TURMA RECURSAL",
+    "1ª VARA - FORTALEZA-CE","2ª VARA - FORTALEZA-CE","3ª VARA - FORTALEZA-CE","4ª VARA - FORTALEZA-CE",
+    "5ª VARA - FORTALEZA-CE","6ª VARA - FORTALEZA-CE","7ª VARA - FORTALEZA-CE","8ª VARA - FORTALEZA-CE",
+    "9ª VARA - FORTALEZA-CE","10ª VARA - FORTALEZA-CE","11ª VARA - FORTALEZA-CE","12ª VARA - FORTALEZA-CE",
+    "13ª VARA - JEF - FORTALEZA-CE","14ª VARA - JEF - FORTALEZA-CE","20ª VARA - FORTALEZA-CE",
+    "21ª VARA - JEF - FORTALEZA-CE","26ª VARA - JEF - FORTALEZA - CE","28ª VARA - JEF - FORTALEZA-CE",
+    "32ª VARA - FORTALEZA-CE","33ª VARA - FORTALEZA-CE",
+
+    "15ª VARA - LIMOEIRO DO NORTE-CE","29ª VARA - JEF - LIMOEIRO DO NORTE - CE",
+    "SUBDIRETORIA DO FORO - LIMOEIRO DO NORTE",
+    
+    "16ª VARA - JUAZEIRO DO NORTE-CE","17ª VARA - JEF - JUAZEIRO DO NORTE-CE",
+    "30ª VARA - JEF - JUAZEIRO DO NORTE - CE",
+    "SUBDIRETORIA DO FORO - JUAZEIRO DO NORTE",
+    
+    "18ª VARA - SOBRAL-CE","19ª VARA - JEF - SOBRAL-CE","31ª VARA - JEF - SOBRAL - CE",
+    "SUBDIRETORIA DO FORO - SOBRAL",
+    
+    "22ª VARA - CRATEÚS-CE","SUBDIRETORIA DO FORO - CRATEÚS",
+
+    "23ª VARA - QUIXADÁ-CE","SUBDIRETORIA DO FORO - QUIXADÁ",
+
+    "24ª VARA - TAUÁ-CE","SUBDIRETORIA DO FORO - TAUÁ",'TOTAL TAUÁ',
+
+    "25ª VARA - IGUATU-CE","SUBDIRETORIA DO FORO - IGUATU",
+
+    "27ª VARA- ITAPIPOCA-CE","SUBDIRETORIA DO FORO - ITAPIPOCA",
+
+    "34ª VARA - MARACANAÚ-CE","35ª VARA - JEF - MARACANAÚ-CE",
+    "SUBDIRETORIA DO FORO - MARACANAÚ",
+
+    "SERVIDORA EM LICENÇA GESTANTE EXERC. FUNÇÃO","SERVIDORES CEDIDOS/EXERCICIO PROVISÓRIO/REMOVIDO",
+    
+    "NUCLEO DE AUDITORIA INTERNA","NUCLEO DE ESTRATEGIA, GOVERNANÇA E INTEGRIDADE",
+    "NUCLEO DE GESTAO DE PESSOAS","NUCLEO DE GESTAO ORCAMENTARIA FINANCEIRA CONTABIL E PATRIMONIAL",
+    "NUCLEO DE INFRAESTRUTURA E ADMINISTRAÇAO PREDIAL","NUCLEO DE INTELIGENCIA, SEGURANÇA E TRANSPORTE",
+    "NUCLEO DE TECNOLOGIA DA INFORMAÇAO E COMUNICAÇAO","NUCLEO JUDICIARIO"]
+
+## Função para limpar nomes de abas com caracteres inválidos
 def limpar_nome_aba(nome):
     return re.sub(r'[\[\]\:\*\?\/\\]', '', nome)[:31]
-    
-dados = pd.concat([dados_adm, dados_jud], ignore_index=True)
-dados['STATUS_PROVIMENTO'] = dados['SITUACAO'].apply(classificar_vinculo)
 
-painel = st.sidebar.radio("Selecione o painel", ["Mapa da Corregedoria", "Dados Brutos", "Análises"])
+# Construção do Streamlit
+## Sidebar e seleção de painéis
+painel = st.sidebar.radio("Selecione o painel:", ["Mapa da Corregedoria", "Análises", "Dados Brutos"])
 
+## Painel Mapa da Corregedoria
 if painel == "Mapa da Corregedoria":
+
+    ### Título e descrição
     st.title("Mapa da Corregedoria")
+    st.write('Versão 1.0.0')
     st.write("Este é o mapa da corregedoria da Justiça Federal do Ceará.")
 
-    grupos_subsecao = {
-        'TOTAL_FORTALEZA': [
-            '1ª VARA - FORTALEZA-CE','2ª VARA - FORTALEZA-CE','3ª VARA - FORTALEZA-CE','4ª VARA - FORTALEZA-CE','5ª VARA - FORTALEZA-CE',
-            '6ª VARA - FORTALEZA-CE','7ª VARA - FORTALEZA-CE','8ª VARA - FORTALEZA-CE','9ª VARA - FORTALEZA-CE','10ª VARA - FORTALEZA-CE',
-            '11ª VARA - FORTALEZA-CE','12ª VARA - FORTALEZA-CE','13ª VARA - JEF - FORTALEZA-CE','14ª VARA - JEF - FORTALEZA-CE',
-            '20ª VARA - FORTALEZA-CE','21ª VARA - JEF - FORTALEZA-CE','26ª VARA - JEF - FORTALEZA - CE','28ª VARA - JEF - FORTALEZA-CE',
-            '32ª VARA - FORTALEZA-CE','33ª VARA - FORTALEZA-CE',
-            '1ª TURMA RECURSAL','2ª TURMA RECURSAL','2ª TURMA RECURSAL/JEF/CE','3ª TURMA RECURSAL','3ª TURMA RECURSAL/JEF/CE',
-            'DIRETORIA DO FORO','SECRETARIA ADMINISTRATIVA'
-        ],
-        'TOTAL_LIMOEIRO': ['15ª VARA - LIMOEIRO DO NORTE-CE','29ª VARA - JEF - LIMOEIRO DO NORTE - CE'],
-        'TOTAL_JUAZEIRO': ['16ª VARA - JUAZEIRO DO NORTE-CE','17ª VARA - JEF - JUAZEIRO DO NORTE-CE','30ª VARA - JEF - JUAZEIRO DO NORTE - CE'],
-        'TOTAL_SOBRAL': ['18ª VARA - SOBRAL-CE','19ª VARA - JEF - SOBRAL-CE','31ª VARA - JEF - SOBRAL - CE'],
-        'TOTAL_CRATEUS': ['22ª VARA - CRATEÚS-CE'],
-        'TOTAL_QUIXADA': ['23ª VARA - QUIXADÁ-CE'],
-        'TOTAL_TAUA': ['24ª VARA - TAUÁ-CE'],
-        'TOTAL_IGUATU': ['25ª VARA - IGUATU-CE'],
-        'TOTAL_ITAPIPOCA': ['27ª VARA- ITAPIPOCA-CE'],
-        'TOTAL_MARACANAU': ['34ª VARA - MARACANAÚ-CE','35ª VARA - JEF - MARACANAÚ-CE'],
-        'TOTAL_SERVIDORES': ['TOTAL_FORTALEZA','TOTAL_LIMOEIRO''TOTAL_JUAZEIRO','TOTAL_SOBRAL','TOTAL_CRATEUS','TOTAL_QUIXADA','TOTAL_TAUA',
-                            'TOTAL_IGUATU','TOTAL_ITAPIPOCA', 'TOTAL_MARACANAU']
-    }
+    ### Construção das tabelas de contingência
+    #### Tabelas de contingência iniciais
+    ct_cargo = pd.crosstab(dados['descricaoCargo'], dados['descricaoLotacaoPai_subdiretoria'])
+    ct_vinculo = pd.crosstab(dados['vinculo'], dados['descricaoLotacaoPai_subdiretoria'])
 
-    ordem_colunas  = ['1ª VARA - FORTALEZA-CE','2ª VARA - FORTALEZA-CE','3ª VARA - FORTALEZA-CE','4ª VARA - FORTALEZA-CE','5ª VARA - FORTALEZA-CE',
-            '6ª VARA - FORTALEZA-CE','7ª VARA - FORTALEZA-CE','8ª VARA - FORTALEZA-CE','9ª VARA - FORTALEZA-CE','10ª VARA - FORTALEZA-CE',
-            '11ª VARA - FORTALEZA-CE','12ª VARA - FORTALEZA-CE','13ª VARA - JEF - FORTALEZA-CE','14ª VARA - JEF - FORTALEZA-CE',
-            '20ª VARA - FORTALEZA-CE','21ª VARA - JEF - FORTALEZA-CE','26ª VARA - JEF - FORTALEZA - CE','28ª VARA - JEF - FORTALEZA-CE',
-            '32ª VARA - FORTALEZA-CE','33ª VARA - FORTALEZA-CE',
-            '1ª TURMA RECURSAL','2ª TURMA RECURSAL','2ª TURMA RECURSAL/JEF/CE','3ª TURMA RECURSAL','3ª TURMA RECURSAL/JEF/CE',#Recursais
-            'DIRETORIA DO FORO','SECRETARIA ADMINISTRATIVA',
-            'TOTAL_FORTALEZA',
-            '15ª VARA - LIMOEIRO DO NORTE-CE','29ª VARA - JEF - LIMOEIRO DO NORTE - CE',#Faltou subdiretoria do foro
-            'TOTAL_LIMOEIRO',
-            '16ª VARA - JUAZEIRO DO NORTE-CE','17ª VARA - JEF - JUAZEIRO DO NORTE-CE','30ª VARA - JEF - JUAZEIRO DO NORTE - CE',#Faltou Sub Foro
-            'TOTAL_JUAZEIRO',
-            '18ª VARA - SOBRAL-CE','19ª VARA - JEF - SOBRAL-CE','31ª VARA - JEF - SOBRAL - CE',#Faltou subdiretoria do foro
-            'TOTAL_SOBRAL',
-            '22ª VARA - CRATEÚS-CE',#Faltou subdiretoria do foro
-            'TOTAL_CRATEUS',
-            '23ª VARA - QUIXADÁ-CE',#Faltou subdiretoria do foro
-            'TOTAL_QUIXADA',                 
-            '24ª VARA - TAUÁ-CE',#Faltou subdiretoria do foro
-            'TOTAL_TAUA',                 
-            '25ª VARA - IGUATU-CE',#Faltou subdiretoria do foro
-            'TOTAL_IGUATU',
-            '27ª VARA- ITAPIPOCA-CE',#Faltou subdiretoria do foro
-            'TOTAL_ITAPIPOCA',
-            '34ª VARA - MARACANAÚ-CE','35ª VARA - JEF - MARACANAÚ-CE',
-            'TOTAL_MARACANAU',
-            'TOTAL_SERVIDORES'
-            #Extras
-            'NUCLEO DE GESTAO DE PESSOAS','NUCLEO DE TECNOLOGIA DA INFORMAÇAO E COMUNICAÇAO','NUCLEO DE INFRAESTRUTURA E ADMINISTRAÇAO PREDIAL',
-            'NUCLEO DE ESTRATEGIA, GOVERNANÇA E INTEGRIDADE','NUCLEO DE AUDITORIA INTERNA']
-    
-    ordem_abas = [
-    'SECRETARIA ADMINISTRATIVA','DIRETORIA DO FORO',
-    '1ª TURMA RECURSAL','2ª TURMA RECURSAL','3ª TURMA RECURSAL','2ª TURMA RECURSAL/JEF/CE','3ª TURMA RECURSAL/JEF/CE',
-    '1ª VARA - FORTALEZA-CE','2ª VARA - FORTALEZA-CE','3ª VARA - FORTALEZA-CE',
-    '4ª VARA - FORTALEZA-CE', '5ª VARA - FORTALEZA-CE', '6ª VARA - FORTALEZA-CE',
-    '7ª VARA - FORTALEZA-CE', '8ª VARA - FORTALEZA-CE', '9ª VARA - FORTALEZA-CE',
-    '10ª VARA - FORTALEZA-CE', '11ª VARA - FORTALEZA-CE', '12ª VARA - FORTALEZA-CE',
-    '13ª VARA - JEF - FORTALEZA-CE', '14ª VARA - JEF - FORTALEZA-CE',
-    '15ª VARA - LIMOEIRO DO NORTE-CE', '16ª VARA - JUAZEIRO DO NORTE-CE',
-    '17ª VARA - JEF - JUAZEIRO DO NORTE-CE', '18ª VARA - SOBRAL-CE',
-    '19ª VARA - JEF - SOBRAL-CE', '20ª VARA - FORTALEZA-CE',
-    '21ª VARA - JEF - FORTALEZA-CE', '22ª VARA - CRATEÚS-CE',
-    '23ª VARA - QUIXADÁ-CE', '24ª VARA - TAUÁ-CE', '25ª VARA - IGUATU-CE',
-    '26ª VARA - JEF - FORTALEZA - CE', '27ª VARA- ITAPIPOCA-CE',
-    '28ª VARA - JEF - FORTALEZA-CE', '29ª VARA - JEF - LIMOEIRO DO NORTE - CE',
-    '30ª VARA - JEF - JUAZEIRO DO NORTE - CE', '31ª VARA - JEF - SOBRAL - CE',
-    '32ª VARA - FORTALEZA-CE', '33ª VARA - FORTALEZA-CE',
-    '34ª VARA - MARACANAÚ-CE', '35ª VARA - JEF - MARACANAÚ-CE',
-    'NUCLEO DE AUDITORIA INTERNA',
-    'NUCLEO DE ESTRATEGIA, GOVERNANÇA E INTEGRIDADE',
-    'NUCLEO DE GESTAO DE PESSOAS',
-    'NUCLEO DE INFRAESTRUTURA E ADMINISTRAÇAO PREDIAL',
-    'NUCLEO DE TECNOLOGIA DA INFORMAÇAO E COMUNICAÇAO']
+    #### Definição dos nomes dos índices
+    ct_cargo.index.name = "CARGO"
+    ct_vinculo.index.name = "VÍNCULO"
 
-    ct_cargo = pd.crosstab(dados['CARGO'], dados['LOTACAO_PAI'])
-    ct_prov  = pd.crosstab(dados['STATUS_PROVIMENTO'], dados['LOTACAO_PAI'])
+    #### Cálculo dos totais conforme grupos de subseção
+    ct_cargo.columns = ct_cargo.columns.str.strip().str.upper()
+    ct_vinculo.columns = ct_vinculo.columns.str.strip().str.upper()
 
-    colunas_validas = [col for col in ordem_colunas if col in ct_cargo.columns or col in ct_prov.columns]
+    #### Adição das colunas de totalizadores
+    for total_col, subcols in grupos_subsecao.items():
+        subcols_upper = [s.strip().upper() for s in subcols]
+        colunas_existentes_cargo = [c for c in ct_cargo.columns if c in subcols_upper]
+        colunas_existentes_vinculo = [c for c in ct_vinculo.columns if c in subcols_upper]
+        ct_cargo[total_col] = ct_cargo[colunas_existentes_cargo].sum(axis=1) if colunas_existentes_cargo else 0
+        ct_vinculo[total_col] = ct_vinculo[colunas_existentes_vinculo].sum(axis=1) if colunas_existentes_vinculo else 0
 
-    ct_cargo = ct_cargo.reindex(columns=colunas_validas, fill_value=0)
-    ct_prov  = ct_prov.reindex(columns=colunas_validas, fill_value=0)
+    #### Reordenação das colunas conforme ordem definida
+    colunas_finais_cargo = [c for c in ordem_colunas_mapa if c in ct_cargo.columns]
+    colunas_finais_vinculo = [c for c in ordem_colunas_mapa if c in ct_vinculo.columns]
 
+    #### Reordenação das tabelas de contingência
+    ct_cargo = ct_cargo[colunas_finais_cargo + [c for c in ct_cargo.columns if c not in colunas_finais_cargo]].fillna(0)
+    ct_vinculo = ct_vinculo[colunas_finais_vinculo + [c for c in ct_vinculo.columns if c not in colunas_finais_vinculo]].fillna(0)
+
+    #### Adição da linha de totais gerais
+    ct_cargo.loc["TOTAL"] = ct_cargo.sum(numeric_only=True)
+    ct_vinculo.loc["TOTAL"] = ct_vinculo.sum(numeric_only=True)
+
+    #### Preenchimento de valores ausentes com zero
+    ct_cargo = ct_cargo.fillna(0)
+    ct_vinculo = ct_vinculo.fillna(0)
+
+    #### Exibição das tabelas no Streamlit
     st.write("Cargos por serventia")
     st.dataframe(ct_cargo)
-
     st.write("Provimentos por serventia")
-    st.dataframe(ct_prov)
+    st.dataframe(ct_vinculo)
 
-    # Exportar tabela completa
-    ct_prov = ct_prov.reindex(['EFETIVO', 'REQUISITADO', 'EXERCÍCIO PROVISÓRIO', 'REMOVIDO', 'OUTRO'])
-    cols = ct_cargo.columns.union(ct_prov.columns)
-    ct_cargo = ct_cargo.reindex(columns=cols, fill_value=0)
-    ct_prov  = ct_prov.reindex(columns=cols, fill_value=0)
-    cargo_block = ct_cargo.copy()
-    cargo_block.index = pd.MultiIndex.from_product([['Cargo'], cargo_block.index],
-        names=['Variável', ct_cargo.index.name or 'Categoria'])
-    prov_block = ct_prov.copy()
-    prov_block.index = pd.MultiIndex.from_product([['Provimento'], prov_block.index], names=['Variável', ct_prov.index.name or 'Categoria'])
-    tabela = pd.concat([cargo_block, prov_block])
-    tabela_com_totais = tabela.copy()
-    for nome_total, lotacoes in grupos_subsecao.items():
-        colunas = []
-        for lot in lotacoes:
-            if lot in grupos_subsecao:
-                colunas.extend(grupos_subsecao[lot])
-            else:
-                colunas.append(lot)
-        colunas_validas = [c for c in colunas if c in tabela_com_totais.columns]
-        tabela_com_totais[nome_total] = tabela_com_totais[colunas_validas].sum(axis=1)
+    #### Criação do MultiIndex
+    ct_cargo['VARIÁVEL'] = 'CARGO'
+    ct_vinculo['VARIÁVEL'] = 'VÍNCULO'
 
-    colunas_validas = [col for col in ordem_colunas if col in tabela_com_totais.columns]
-    colunas_restantes = [col for col in tabela_com_totais.columns if col not in colunas_validas]
-    tabela_ordenada = tabela_com_totais[colunas_validas + colunas_restantes]
+    #### Concatenação das tabelas
+    mapa_corregedoria = pd.concat([ct_cargo, ct_vinculo])
+    mapa_corregedoria = mapa_corregedoria.reset_index().rename(columns={'index': 'CATEGORIA'})
+    mapa_corregedoria = mapa_corregedoria.set_index(['VARIÁVEL', mapa_corregedoria.columns[0]])
 
+    #### Exportação para Excel com bordas
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        mapa_corregedoria.to_excel(writer, sheet_name='Mapa da Corregedoria', merge_cells=True)
+    buffer.seek(0)
+
+    # Abre o arquivo gerado
+    wb = load_workbook(buffer)
+    ws = wb['Mapa da Corregedoria']
+
+    # Define o estilo de borda fina preta
+    thin_border = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
+
+    # Aplica bordas em todas as células preenchidas
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        for cell in row:
+            cell.border = thin_border
+
+    #### Nome do arquivo com data
     hoje = datetime.today().strftime('%d-%m-%Y')
     nome_arquivo = f'Mapa da Corregedoria {hoje}.xlsx'
-    with pd.ExcelWriter(nome_arquivo, engine='openpyxl') as writer:
-        tabela_ordenada.to_excel(writer, sheet_name="Mapa da Corregedoria")
-        abas_usadas = set()
-        for lotacao in ordem_abas:
-            if lotacao in dados['LOTACAO_PAI'].unique():
-                df_lotacao = dados[dados['LOTACAO_PAI'] == lotacao]
-                aba = limpar_nome_aba(lotacao)
-                while aba in abas_usadas:
-                    aba += "_"
-                    aba = aba[:31]
-                abas_usadas.add(aba)
-                df_lotacao.to_excel(writer, sheet_name=aba, index=False)
 
-    with open(nome_arquivo, "rb") as file:
-        st.download_button(
-            label="📥 Baixar Mapa da Corregedoria",
-            data=file,
-            file_name=nome_arquivo,
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        
+    #### Botão de download
+    buffer_multi = io.BytesIO()
+    with pd.ExcelWriter(buffer_multi, engine='openpyxl') as writer:
+        mapa_corregedoria.to_excel(writer, sheet_name='Mapa da Corregedoria', merge_cells=True)
+        for aba in ordem_abas_arquivo:
+            df_aba = dados[dados['descricaoLotacaoPai_subdiretoria'].astype(str).str.strip() == aba]
+            df_aba = df_aba.drop(columns=['descricaoLotacaoPai_subdiretoria','lotacaoSimplificada'], errors='ignore')
+            aba_limpa = re.sub(r'[\\/*?:\[\]]', ' ', aba).strip()[:31]
+            df_aba.to_excel(writer, index=False, sheet_name=aba_limpa)
+    buffer_multi.seek(0)
+    nome_arquivo_abas = f'Mapa da Corregedoria {hoje}.xlsx'
+    st.download_button(label="📥 Download Mapa da Corregedoria", data=buffer_multi, 
+        file_name=nome_arquivo_abas, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    ### Seção de lotações e provimento       
     st.title("Lotações")
-    lotacoes_validas = [s for s in ordem_abas if s in dados['LOTACAO_PAI'].unique()]
-    selecao_lotacoes = st.selectbox("Selecione a lotação para ver a quantidade de servidores:", lotacoes_validas)
+    lotacoes_validas = [s for s in ordem_abas_arquivo if s in dados['descricaoLotacaoPai_subdiretoria'].unique()]
+    selecao_lotacoes = st.selectbox("Selecione a lotação para ver a quantidade de servidores em uma lotação específica:", lotacoes_validas)
 
-    tabela_lotacoes = dados[dados['LOTACAO_PAI'] == selecao_lotacoes]
-    tabela_lotacoes = (tabela_lotacoes.groupby("CARGO").size().reset_index(name='Quantidade de servidores')
-        .sort_values(by='Quantidade de servidores', ascending=False))
-    st.dataframe(tabela_lotacoes.reset_index(drop=True), use_container_width=False)
+    tabela_lotacoes = dados[dados['descricaoLotacaoPai_subdiretoria'] == selecao_lotacoes]
+    tabela_lotacoes = (tabela_lotacoes.groupby("descricaoCargo").size().reset_index(name='QUANTIDADE DE SERVIDORES')
+        .sort_values(by='QUANTIDADE DE SERVIDORES', ascending=False))
+    tabela_lotacoes = tabela_lotacoes.reset_index(drop=True)
+    st.dataframe(tabela_lotacoes.rename(columns={"descricaoCargo": "CARGO"}), use_container_width=False)
     
     hoje = datetime.today().strftime('%d-%m-%Y')
     nome_arquivo = f"Lotação - {selecao_lotacoes} - {hoje}.xlsx"
     tabela_lotacoes.to_excel(nome_arquivo, index=False, engine='openpyxl')
 
     # Cria botão de download
-    with open(nome_arquivo, "rb") as file:
-        st.download_button(
-            label=f"📥 Baixar dados da {selecao_lotacoes}",
-            data=file,
-            file_name=nome_arquivo,
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            key="download_lotacoes"
-        )
+    # with open(nome_arquivo, "rb") as file:
+    #     st.download_button(label=f"📥 Download dados da {selecao_lotacoes}", data=file,
+    #         file_name=nome_arquivo, mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    #         key="download_lotacoes")
         
     st.title("Provimento")
-    selecao_provimento = st.selectbox("Selecione a lotação para ver a quantidade de servidores:", 
+    selecao_provimento = st.selectbox("Selecione a lotação para ver a quantidade de servidores em uma lotação específica:", 
                                       lotacoes_validas,key="select_lotacao_provimento")
 
-    tabela_provimento = dados[dados['LOTACAO_PAI'] == selecao_provimento]
-    tabela_provimento = (tabela_provimento.groupby("STATUS_PROVIMENTO").size().reset_index(name='Quantidade de servidores')
-        .sort_values(by='Quantidade de servidores', ascending=False))
-    st.dataframe(tabela_provimento.reset_index(drop=True), use_container_width=False)
+    tabela_provimento = dados[dados['descricaoLotacaoPai'] == selecao_provimento]
+    tabela_provimento = (tabela_provimento.groupby("vinculo").size().reset_index(name='QUANTIDADE DE SERVIDORES')
+        .sort_values(by='QUANTIDADE DE SERVIDORES', ascending=False))
+    tabela_provimento = tabela_provimento.reset_index(drop=True)
+    st.dataframe(tabela_provimento.rename(columns={"vinculo": "VÍNCULO"}), use_container_width=False)
+
     hoje = datetime.today().strftime('%d-%m-%Y')
     nome_arquivo = f"Lotação - {selecao_provimento} - {hoje}.xlsx"
     tabela_provimento.to_excel(nome_arquivo, index=False, engine='openpyxl')
 
     # Cria botão de download
-    with open(nome_arquivo, "rb") as file:
-        st.download_button(
-            label=f"📥 Baixar dados da {selecao_provimento}",
-            data=file,
-            file_name=nome_arquivo,
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            key="download_provimento"
-        )
+    # with open(nome_arquivo, "rb") as file:
+    #     st.download_button(label=f"📥 Download dados da {selecao_provimento}", data=file,
+    #         file_name=nome_arquivo, mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    #         key="download_provimento")
 
+## Painel Análises       
+elif painel == "Análises":
+    st.title("Análises")
+    st.write("Explore os dados de servidores por lotação, cargo e vínculo.")
+
+    #### Filtros
+    colf1, colf2, colf3 = st.columns(3)
+    with colf1:
+        filtro_lotacao = st.multiselect("Selecione a lotação:", options=sorted(dados['descricaoLotacaoPai_subdiretoria'].dropna().unique()), 
+                                        default=None, placeholder="Nenhuma lotação selecionada")
+    with colf2:
+        filtro_cargo = st.multiselect("Selecione o cargo:", options=sorted(dados['descricaoCargo'].dropna().unique()), 
+                                       default=None, placeholder="Nenhum cargo selecionado")
+    with colf3:
+        filtro_vinculo = st.multiselect("Selecione o vínculo:", options=sorted(dados['vinculo'].dropna().unique()), 
+                                         default=None, placeholder="Nenhum vínculo selecionado")
+
+    #### Aplicação dos filtros
+    df_filtrado = dados.copy()
+    if filtro_lotacao:
+        df_filtrado = df_filtrado[df_filtrado['descricaoLotacaoPai_subdiretoria'].isin(filtro_lotacao)]
+    if filtro_cargo:
+        df_filtrado = df_filtrado[df_filtrado['descricaoCargo'].isin(filtro_cargo)]
+    if filtro_vinculo:
+        df_filtrado = df_filtrado[df_filtrado['vinculo'].isin(filtro_vinculo)]
+
+    #### Agregações
+    lotacoes_df = df_filtrado['descricaoLotacaoPai_subdiretoria'].value_counts().sort_values(ascending=False).reset_index()
+    lotacoes_df.columns = ['Lotação', 'Servidores']
+    cargos_df = df_filtrado['descricaoCargo'].value_counts().sort_values(ascending=False).reset_index()
+    cargos_df.columns = ['Cargo', 'Servidores']
+    vinculo_df = df_filtrado['vinculo'].value_counts().sort_values(ascending=False).reset_index()
+    vinculo_df.columns = ['Vínculo', 'Servidores']
+
+    # opcao_top = st.selectbox("Selecione o número de categorias para exibir:", [10, 20, 30, 50, len(lotacoes_df)], index=1)
+    # dados_filtrados = lotacoes_df.nlargest(opcao_top, 'Servidores')
+    # altura = 800
+    # fig1 = px.bar(dados_filtrados, y='Lotação', x='Servidores', orientation='h', color='Servidores', color_continuous_scale='tealgrn', title=f"Lotações com mais servidores", text='Servidores')
+    # fig1.update_layout(yaxis={'categoryorder':'total ascending','tickfont':dict(size=16)}, xaxis={'tickfont':dict(size=16)}, title={'font':dict(size=24)}, height=altura, bargap=0.4)
+    # fig1.update_traces(texttemplate='%{x}', textposition='outside', cliponaxis=False)
+    # st.plotly_chart(fig1, use_container_width=True)
+
+    st.markdown("### Lotações com mais servidores")
+    opcao_top = st.selectbox("Selecione o número de categorias para exibir:", [5, 10, 20, 30, 50, len(lotacoes_df)], index=1)
+    dados_filtrados = lotacoes_df.nlargest(opcao_top, 'Servidores')
+    fig1 = px.bar(dados_filtrados, y='Lotação', x='Servidores', orientation='h', color='Servidores', color_continuous_scale='tealgrn', title=None, text='Servidores')
+    fig1.update_layout(yaxis={'categoryorder':'total ascending','tickfont':dict(size=16)}, xaxis={'tickfont':dict(size=16)}, bargap=0.4, margin=dict(t=20))
+    fig1.update_traces(texttemplate='%{x}', textposition='outside', cliponaxis=False)
+    st.plotly_chart(fig1, use_container_width=True)
+
+    col1, col2 = st.columns([2,1])
+    with col1:
+        st.markdown("### Cargos por servidores")
+        fig2 = px.bar(cargos_df, y='Cargo', x='Servidores', orientation='h', color='Servidores', color_continuous_scale='tealgrn', title=None, text='Servidores')
+        fig2.update_layout(yaxis={'categoryorder':'total ascending','tickfont':dict(size=13)}, xaxis={'tickfont':dict(size=13)}, height=700, bargap=0.4, margin=dict(t=20))
+        fig2.update_traces(texttemplate='%{x}', textposition='outside', cliponaxis=False)
+        st.plotly_chart(fig2, use_container_width=True)
+
+    with col2:
+        st.markdown("### Distribuição por tipo de vínculo")
+        fig3 = px.pie(vinculo_df, names='Vínculo', values='Servidores', hole=0.45, title=None, color_discrete_sequence=px.colors.qualitative.Pastel)
+        fig3.update_layout(legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"), height=500, margin=dict(t=20))
+        st.plotly_chart(fig3, use_container_width=True)
+    # if not filtro_cargo and not filtro_vinculo:
+    #     top_vinculo_cargo = df_filtrado.groupby(['vinculo','descricaoCargo']).size().reset_index(name='Servidores')
+    #     top_vinculo_cargo = top_vinculo_cargo.sort_values(['Servidores'], ascending=False).groupby('vinculo').head(3)
+    #     st.markdown("### Cargos por tipo de vínculo")
+    #     fig6 = px.bar(top_vinculo_cargo, x='Servidores', y='vinculo', color='descricaoCargo', orientation='h', title=None, height=600, text='Servidores', color_discrete_sequence=px.colors.sequential.Tealgrn)
+    #     fig6.update_traces(texttemplate='%{x}', textposition='outside', cliponaxis=False)
+    #     fig6.update_layout(yaxis={'categoryorder':'total ascending','tickfont':dict(size=13)}, xaxis={'tickfont':dict(size=13)}, legend_title_text='Cargo', bargap=0.3, margin=dict(t=20,l=100,r=20))
+    #     st.plotly_chart(fig6, use_container_width=True)
+
+## Painel Dados Brutos
 elif painel == "Dados Brutos":
-    st.title("Dados primários")
-    ordem_lotacoes = [
-        'SECRETARIA ADMINISTRATIVA','DIRETORIA DO FORO',
-        '1ª TURMA RECURSAL','2ª TURMA RECURSAL','3ª TURMA RECURSAL','2ª TURMA RECURSAL/JEF/CE','3ª TURMA RECURSAL/JEF/CE',
-        '1ª VARA - FORTALEZA-CE','2ª VARA - FORTALEZA-CE','3ª VARA - FORTALEZA-CE',
-        '4ª VARA - FORTALEZA-CE', '5ª VARA - FORTALEZA-CE', '6ª VARA - FORTALEZA-CE',
-        '7ª VARA - FORTALEZA-CE', '8ª VARA - FORTALEZA-CE', '9ª VARA - FORTALEZA-CE',
-        '10ª VARA - FORTALEZA-CE', '11ª VARA - FORTALEZA-CE', '12ª VARA - FORTALEZA-CE',
-        '13ª VARA - JEF - FORTALEZA-CE', '14ª VARA - JEF - FORTALEZA-CE',
-        '15ª VARA - LIMOEIRO DO NORTE-CE', '16ª VARA - JUAZEIRO DO NORTE-CE',
-        '17ª VARA - JEF - JUAZEIRO DO NORTE-CE', '18ª VARA - SOBRAL-CE',
-        '19ª VARA - JEF - SOBRAL-CE', '20ª VARA - FORTALEZA-CE',
-        '21ª VARA - JEF - FORTALEZA-CE', '22ª VARA - CRATEÚS-CE',
-        '23ª VARA - QUIXADÁ-CE', '24ª VARA - TAUÁ-CE', '25ª VARA - IGUATU-CE',
-        '26ª VARA - JEF - FORTALEZA - CE', '27ª VARA- ITAPIPOCA-CE',
-        '28ª VARA - JEF - FORTALEZA-CE', '29ª VARA - JEF - LIMOEIRO DO NORTE - CE',
-        '30ª VARA - JEF - JUAZEIRO DO NORTE - CE', '31ª VARA - JEF - SOBRAL - CE',
-        '32ª VARA - FORTALEZA-CE', '33ª VARA - FORTALEZA-CE',
-        '34ª VARA - MARACANAÚ-CE', '35ª VARA - JEF - MARACANAÚ-CE',
-        'NUCLEO DE AUDITORIA INTERNA',
-        'NUCLEO DE ESTRATEGIA, GOVERNANÇA E INTEGRIDADE',
-        'NUCLEO DE GESTAO DE PESSOAS',
-        'NUCLEO DE INFRAESTRUTURA E ADMINISTRAÇAO PREDIAL',
-        'NUCLEO DE TECNOLOGIA DA INFORMAÇAO E COMUNICAÇAO'
-    ]
-    lotacoes = [s for s in ordem_lotacoes if s in dados['LOTACAO_PAI'].unique()]
+    st.title("Dados")
+    lotacoes = [s for s in ordem_abas_arquivo if s in dados['descricaoLotacaoPai_subdiretoria'].unique()]
     selecao_lotacoes = st.selectbox("Selecione a lotação para ver os dados:", lotacoes)
-    tabela = dados[dados['LOTACAO_PAI'] == selecao_lotacoes]
+    tabela = dados[dados['descricaoLotacaoPai_subdiretoria'] == selecao_lotacoes]
     tabela_formatada = tabela.reset_index(drop=True)
+    tabela_formatada = tabela_formatada.drop(columns=['descricaoLotacaoPai_subdiretoria','lotacaoSimplificada'], errors='ignore')
     st.data_editor(tabela_formatada, use_container_width=True, hide_index=True, disabled=True)
     hoje = datetime.today().strftime('%d-%m-%Y')
     nome_arquivo = f'Dados da lotação - {selecao_lotacoes} {hoje}.xlsx'
     tabela.to_excel(nome_arquivo, index=False, engine='openpyxl')
     with open(nome_arquivo, "rb") as file:
-        st.download_button(label=f"📥 Baixar dados da {selecao_lotacoes}", data=file,
+        st.download_button(label=f"📥 Download dados da {selecao_lotacoes}", data=file,
             file_name=nome_arquivo, mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-elif painel == "Análises":
-    st.title("Análises")
-    lotacoes = dados['LOTACAO_PAI'].value_counts().sort_values(ascending=False)
-    cargos = dados['CARGO'].value_counts().sort_values(ascending=False)
-    lotacoes_df = lotacoes.reset_index()
-    lotacoes_df.columns = ['Lotação', 'Quantidade de Servidores']
-    cargos_df = cargos.reset_index()
-    cargos_df.columns = ['Cargo', 'Quantidade de Servidores']
 
-    col1, col2 = st.columns([2,1])
-    with col1:
-        fig1 = px.bar(lotacoes_df, y='Lotação', x='Quantidade de Servidores', orientation='h',
-            labels={'Lotação': 'Lotação', 'Quantidade de Servidores': 'Quantidade de Servidores'},
-            title="Quantidade de Servidores por Lotação")
-        fig1.update_layout(
-            yaxis={'categoryorder':'total ascending', 'tickfont': dict(size=16), 'titlefont': dict(size=18)},
-            xaxis={'tickfont': dict(size=16), 'titlefont': dict(size=18)},
-            title={'font': dict(size=22)}, height=700)
-        for i, row in lotacoes_df.iterrows():
-            fig1.add_annotation(
-            x=row['Quantidade de Servidores'],
-            y=row['Lotação'],
-            text=str(row['Quantidade de Servidores']), showarrow=False, font=dict(size=14), 
-            xanchor='left', yanchor='middle')
-        fig1.update_traces(text=None, textposition='outside')
-        st.plotly_chart(fig1, use_container_width=True)
-
-        fig2 = px.bar(cargos_df, y='Cargo', x='Quantidade de Servidores', orientation='h',
-            labels={'Cargo': 'Cargo', 'Quantidade de Servidores': 'Qtd de Servidores'},
-            title="Quantidade de Servidores por Cargo", color='Quantidade de Servidores',
-            color_continuous_scale='Blues')
-        fig2.update_layout(
-            yaxis={'categoryorder':'total ascending', 'tickfont': dict(size=16), 'titlefont': dict(size=18)},
-            xaxis={'tickfont': dict(size=16), 'titlefont': dict(size=18)}, title={'font': dict(size=22)}, height=700,
-            coloraxis_colorbar=dict(orientation='h', y=-0.25, x=0.5, xanchor='center', len=0.7, thickness=15, 
-                                    title=None))
-        fig2.update_traces(text=cargos_df['Quantidade de Servidores'], textposition='outside')
-        st.plotly_chart(fig2, use_container_width=True)
-        
-        with col2:
-            provimento_counts = dados['PROVIMENTO'].value_counts().reset_index()
-            provimento_counts.columns = ['Provimento', 'Quantidade']
-            fig3 = px.pie(provimento_counts, names='Provimento', values='Quantidade',
-                title='Distribuição dos Servidores por Tipo de Provimento', hole=0.4)
-            fig3.update_layout(legend_title_text='Tipo de Provimento',
-                               legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"))
-            st.plotly_chart(fig3, use_container_width=True)
-            
-            provimento_treemap = dados['PROVIMENTO'].value_counts().reset_index()
-            provimento_treemap.columns = ['Provimento', 'Quantidade']
-            fig4 = px.treemap(
-                provimento_treemap,
-                path=['Provimento'],
-                values='Quantidade',
-                color='Quantidade',
-                color_continuous_scale='Blues',
-                hover_data={'Quantidade': True},
-                title='Treemap: Distribuição por Provimento'
-            )
-            fig4.update_layout(margin=dict(t=50, l=25, r=25, b=25), height=700)
-            st.plotly_chart(fig4, use_container_width=True)
