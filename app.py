@@ -23,15 +23,61 @@ try:
     resposta = requests.get(url, timeout=20)
     resposta.raise_for_status()
     dados_json = resposta.json()
-    # Acessa a lista de funcionários dentro do dicionário
     funcionarios = dados_json["mapaCorregedoria"]["funcionarios"]
-    # Converte para DataFrame
     dados = pd.DataFrame(funcionarios)
 
-
 except requests.exceptions.RequestException as e:
-    st.write(f"Erro ao acessar o webservice: {e}. Comunique a equipe responsável.")
-    
+    st.markdown(
+        f"""
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+                    height:90vh;text-align:center;color:#b00020;">
+            <img src="https://cdn-icons-png.flaticon.com/512/564/564619.png" width="120" style="margin-bottom:20px;">
+            <h2 style="font-family:'Segoe UI',sans-serif;">Erro ao acessar o webservice</h2>
+            <p style="max-width:600px;font-size:18px;">
+                404 - Serviço não encontrado ou temporariamente indisponível.<br><br>
+                <b>Detalhe técnico:</b> {e}<br><br>
+                <span style="font-size:16px;color:#444;">Comunique a equipe responsável.</span>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.stop()
+
+except KeyError:
+    st.markdown(
+        """
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+                    height:90vh;text-align:center;color:#b00020;">
+            <img src="https://cdn-icons-png.flaticon.com/512/564/564619.png" width="120" style="margin-bottom:20px;">
+            <h2 style="font-family:'Segoe UI',sans-serif;">Erro no formato dos dados</h2>
+            <p style="max-width:600px;font-size:18px;">
+                O webservice retornou um formato inesperado.<br><br>
+                <span style="font-size:16px;color:#444;">Comunique a equipe técnica responsável.</span>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.stop()
+
+except Exception as e:
+    st.markdown(
+        f"""
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+                    height:90vh;text-align:center;color:#b00020;">
+            <img src="https://cdn-icons-png.flaticon.com/512/564/564619.png" width="120" style="margin-bottom:20px;">
+            <h2 style="font-family:'Segoe UI',sans-serif;">Erro inesperado</h2>
+            <p style="max-width:600px;font-size:18px;">
+                Algo deu errado durante a execução.<br><br>
+                <b>Detalhe técnico:</b> {e}<br><br>
+                <span style="font-size:16px;color:#444;">Por favor, comunique a equipe responsável.</span>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.stop()
 
 # Transformação dos dados
 ## Definição do vínculo
@@ -484,8 +530,9 @@ elif painel == "Dados Brutos":
     st.data_editor(tabela_formatada, use_container_width=True, hide_index=True, disabled=True)
     hoje = datetime.today().strftime('%d-%m-%Y')
     nome_arquivo = f'Dados da lotação - {selecao_lotacoes} {hoje}.xlsx'
-    tabela.to_excel(nome_arquivo, index=False, engine='openpyxl')
-    with open(nome_arquivo, "rb") as file:
-        st.download_button(label=f"📥 Download dados da {selecao_lotacoes}", data=file,
-            file_name=nome_arquivo, mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    if st.button(f"📥 Gerar arquivo da {selecao_lotacoes}"):
+        tabela.to_excel(nome_arquivo, index=False, engine='openpyxl')
+        with open(nome_arquivo, "rb") as file:
+            st.download_button(label=f"⬇️ Baixar dados da {selecao_lotacoes}", data=file,
+                file_name=nome_arquivo, mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
